@@ -1,0 +1,134 @@
+#!/bin/bash
+
+# aipack: Package scripts from a directory with customizable options
+
+# Load utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Default configurations
+declare -A EXTENSIONS_GROUPS
+EXTENSIONS_GROUPS["default"]="php,html,css,js,sql"
+EXTENSIONS_GROUPS["web"]="html,css,js"
+DEFAULT_OUTPUT="packaged_output.txt"
+
+# Usage function
+usage() {
+    echo "Usage: aipack -d DIRECTORY [options]"
+    echo "Options:"
+    echo "  -d, --directory DIR       Directory to package (required)"
+    echo "  -o, --output FILE         Output file name (default: $DEFAULT_OUTPUT)"
+    echo "  -g, --group GROUP         Preset group to use (default: default)"
+    echo "  -e, --exclude EXTENSIONS  Comma-separated extensions to exclude"
+    echo "  -h, --help                Display this help message"
+}
+
+# Parse command-line arguments
+PARSED_ARGS=$(getopt -o d:o:g:e:h --long directory:,output:,group:,exclude:,help -- "$@")
+if [[ $? -ne 0 ]]; then
+    usage
+    exit 1
+fi
+eval set -- "$PARSED_ARGS"
+
+# Initialize variables
+DIR=""
+OUTPUT="$DEFAULT_OUTPUT"
+GROUP="default"
+EXCLUDES=()
+
+while true; do
+    case "$1" in
+        -d|--directory)
+            DIR="$2"
+            shift 2
+            ;;
+        -o|--output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        -g|--group)
+            GROUP="$2"
+            shift 2
+            ;;
+        -e|--exclude)
+            IFS=',' read -r -a EXCLUDES <<< "$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+# Validate directory
+if [[ -z "$DIR" ]]; then
+    echo "Error: Directory is required."
+    usage
+    exit 1
+fi
+
+if [[ ! -d "$DIR" ]]; then
+    echo "Error: Directory '$DIR' does not exist."
+    exit 1
+fi
+
+# Load preset extensions
+PRESET_FILE="$SCRIPT_DIR/../presets/${GROUP}.json"
+if [[ ! -f "$PRESET_FILE" ]]; then
+    echo "Error: Preset group '$GROUP' not found."
+    exit 1
+fi
+
+# Extract extensions from JSON
+EXTENSIONS=$(jq -r '.extensions | join(",")' "$PRESET_FILE")
+IFS=',' read -r -a EXT_ARRAY <<< "$EXTENSIONS"
+
+# Remove excluded extensions
+for EX in "${EXCLUDES[@]}"; do
+    EXT_ARRAY=("${EXT_ARRAY[@]/$EX}")
+done
+
+# Construct find conditions
+FIND_CONDITIONS=()
+for EXT in "${EXT_ARRAY[@]}"; do
+    FIND_CONDITIONS+=( -iname "*.$EXT" -o )
+done
+unset 'FIND_CONDITIONS[${#FIND_CONDITIONS[@]}-1]'
+
+# Set output path
+OUTPUT_PATH="$DIR/$OUTPUT"
+rm -f "$OUTPUT_PATH"
+
+# Process files
+find "$DIR" -type f \( "${FIND_CONDITIONS[@]}" \) | while read -r FILE; do
+    echo "Processing $FILE"
+    echo "===== $FILE =====" >> "$OUTPUT_PATH"
+    EXT="${FILE##*.}"
+    case "$EXT" in
+        css|js)
+            minify "$FILE" "$EXT" >> "$OUTPUT_PATH"
+            ;;
+        html|php)
+            minify "$FILE" "$EXT" >> "$OUTPUT_PATH"
+            ;;
+        sql)
+            minify "$FILE" "$EXT" >> "$OUTPUT_PATH"
+            ;;
+        *)
+            cat "$FILE" >> "$OUTPUT_PATH"
+            ;;
+    esac
+    echo -e "\n" >> "$OUTPUT_PATH"
+done
+
+echo "Packaged code has been saved to $OUTPUT_PATH"
