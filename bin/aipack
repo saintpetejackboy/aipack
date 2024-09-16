@@ -1,134 +1,249 @@
 #!/bin/bash
 
-# aipack: Package scripts from a directory with customizable options
-
-# Load utilities
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="1.1.4"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../lib/utils.sh"
-
-# Default configurations
-declare -A EXTENSIONS_GROUPS
-EXTENSIONS_GROUPS["default"]="php,html,css,js,sql"
-EXTENSIONS_GROUPS["web"]="html,css,js"
 DEFAULT_OUTPUT="packaged_output.txt"
+EXTENSIONS_GROUPS=(default web python node java datascience)
+REMOVE_COMMENTS=false
+COMPRESS_OUTPUT=false
+GENERATE_SUMMARY=false
+LOG_LEVEL="INFO"
+INCLUDE_PATTERNS=()
+EXCLUDE_PATTERNS=()
+OUTPUT_FORMAT="txt"
+INCLUDE_LICENSE=false
+INCLUDE_README=false
 
-# Usage function
-usage() {
-    echo "Usage: aipack -d DIRECTORY [options]"
-    echo "Options:"
-    echo "  -d, --directory DIR       Directory to package (required)"
-    echo "  -o, --output FILE         Output file name (default: $DEFAULT_OUTPUT)"
-    echo "  -g, --group GROUP         Preset group to use (default: default)"
-    echo "  -e, --exclude EXTENSIONS  Comma-separated extensions to exclude"
-    echo "  -h, --help                Display this help message"
+# Logging levels
+declare -A LOG_LEVELS=( ["DEBUG"]=0 ["INFO"]=1 ["WARN"]=2 ["ERROR"]=3 )
+
+# Print log messages based on the log level
+log() {
+    local level=$1
+    local message=$2
+    if [ ${LOG_LEVELS[$level]} -ge ${LOG_LEVELS[$LOG_LEVEL]} ]; then
+        case $level in
+            INFO) echo "[INFO] $message" ;;
+            WARN) echo "[WARN] $message" ;;
+            ERROR) echo "[ERROR] $message" ;;
+            DEBUG) echo "[DEBUG] $message" ;;
+        esac
+    fi
 }
 
-# Parse command-line arguments
-PARSED_ARGS=$(getopt -o d:o:g:e:h --long directory:,output:,group:,exclude:,help -- "$@")
-if [[ $? -ne 0 ]]; then
-    usage
-    exit 1
-fi
-eval set -- "$PARSED_ARGS"
+print_banner() {
+    echo "  ,-.       _,---._ __  / \\"
+    echo " /  )    .-'       \`./ /   \\"
+    echo "(  (   ,'            \`/    /|"
+    echo " \\  \`-\"             \\'\\   / |"
+    echo "  \`.              ,  \\ \\ /  |"
+    echo "   /\`.          ,'-\`----Y   |"
+    echo "  (            ;        |   '"
+    echo "  |  ,-.    ,-'         |  /"
+    echo "  |  | (   |            | /"
+    echo "  )  |  \\  \`.___________|/"
+    echo "  \`--'   \`--'"
+    echo "Version ${VERSION}"
+    echo
+}
 
-# Initialize variables
-DIR=""
-OUTPUT="$DEFAULT_OUTPUT"
-GROUP="default"
-EXCLUDES=()
+usage() {
+    print_banner
+    echo "Usage: aipack [-d DIR] [options]"
+    echo "Options:"
+    echo "  -d DIR       Directory to package (default: current directory)"
+    echo "  -o FILE      Output file (default: $DEFAULT_OUTPUT)"
+    echo "  -g GROUP     Preset group (default: default)"
+    echo "  -e EXTS      Exclude extensions (comma-separated)"
+    echo "  -r           Remove comments (experimental)"
+    echo "  -c           Compress output using gzip"
+    echo "  -s           Generate project summary"
+    echo "  -i PATTERN   Include files matching pattern"
+    echo "  -x PATTERN   Exclude files matching pattern"
+    echo "  -f FORMAT    Output format: txt (default), json, xml"
+    echo "  -v LEVEL     Log level: DEBUG, INFO, WARN, ERROR (default: INFO)"
+    echo "  -l           Include LICENSE file"
+    echo "  -m           Include README.md file"
+    echo "  -h           Display this help message"
+}
 
-while true; do
-    case "$1" in
-        -d|--directory)
-            DIR="$2"
-            shift 2
+parse_args() {
+    while getopts "d:o:g:e:rcsi:x:f:v:lmh" opt; do
+        case $opt in
+            d) DIR=$OPTARG ;;
+            o) OUTPUT=$OPTARG ;;
+            g) GROUP=$OPTARG ;;
+            e) IFS=',' read -ra EXCLUDES <<< "$OPTARG" ;;
+            r) REMOVE_COMMENTS=true ;;
+            c) COMPRESS_OUTPUT=true ;;
+            s) GENERATE_SUMMARY=true ;;
+            i) INCLUDE_PATTERNS+=("$OPTARG") ;;
+            x) EXCLUDE_PATTERNS+=("$OPTARG") ;;
+            f) OUTPUT_FORMAT=$OPTARG ;;
+            v) LOG_LEVEL=${OPTARG^^} ;;
+            l) INCLUDE_LICENSE=true ;;
+            m) INCLUDE_README=true ;;
+            h) usage; exit 0 ;;
+            *) usage; exit 1 ;;
+        esac
+    done
+
+    DIR=${DIR:-.}
+
+    if [[ ! -d $DIR ]]; then
+        log "ERROR" "Directory '$DIR' not found."
+        exit 1
+    fi
+
+    OUTPUT=${OUTPUT:-$DEFAULT_OUTPUT}
+    GROUP=${GROUP:-default}
+
+    if [[ ! " ${EXTENSIONS_GROUPS[*]} " =~ " $GROUP " ]]; then
+        log "ERROR" "Invalid group '$GROUP'."
+        exit 1
+    fi
+
+    if [[ ! " txt json xml " =~ " $OUTPUT_FORMAT " ]]; then
+        log "ERROR" "Invalid output format '$OUTPUT_FORMAT'."
+        exit 1
+    fi
+
+    OUTPUT_PATH="$DIR/$OUTPUT"
+    if ! touch "$OUTPUT_PATH" 2>/dev/null; then
+        log "ERROR" "Cannot write to output file '$OUTPUT_PATH'."
+        exit 1
+    fi
+}
+
+load_extensions() {
+    PRESET_FILE="$SCRIPT_DIR/../presets/${GROUP}.json"
+    if [[ ! -f $PRESET_FILE ]]; then
+        log "ERROR" "Preset '$GROUP' not found."
+        exit 1
+    fi
+
+    # Handle errors when reading preset JSON files
+    if ! EXTENSIONS=$(jq -r '.extensions[]' "$PRESET_FILE" 2>/dev/null); then
+        log "ERROR" "Failed to parse preset file '$PRESET_FILE'."
+        exit 1
+    fi
+
+    IFS=$'\n' read -rd '' -a EXT_ARRAY <<< "$EXTENSIONS"
+    for EX in "${EXCLUDES[@]}"; do
+        EXT_ARRAY=("${EXT_ARRAY[@]/$EX}")
+    done
+}
+
+build_find_cmd() {
+    FIND_CMD="find \"$DIR\" -type f"
+    
+    # Start with excluding README and LICENSE
+    FIND_CMD+=" ! -iname 'README.md' ! -iname 'LICENSE'"
+
+    # Add back README and LICENSE if explicitly included
+    if [ "$INCLUDE_README" = true ]; then
+        FIND_CMD+=" -o -iname 'README.md'"
+    fi
+    if [ "$INCLUDE_LICENSE" = true ]; then
+        FIND_CMD+=" -o -iname 'LICENSE'"
+    fi
+
+    # Add extensions
+    for EXT in "${EXT_ARRAY[@]}"; do
+        FIND_CMD+=" -o -iname \"*.$EXT\""
+    done
+
+    # Add include patterns
+    for PATTERN in "${INCLUDE_PATTERNS[@]}"; do
+        FIND_CMD+=" -o -iname \"$PATTERN\""
+    done  # <-- This was 'end', corrected to 'done'
+
+    # Exclude output file
+    FIND_CMD+=" ! -iname '$OUTPUT'"
+
+    # Add exclude patterns
+    for PATTERN in "${EXCLUDE_PATTERNS[@]}"; do
+        FIND_CMD+=" ! -iname \"$PATTERN\""
+    done
+
+    FIND_CMD+=" | grep -v '/.git/' | sort"
+}
+
+
+output_structure() {
+    log "INFO" "Generating project structure..."
+    {
+        echo "=== PROJECT STRUCTURE ==="
+        find "$DIR" -maxdepth 3 -not -path '*/\.*' | sed -e "s|$DIR/||" -e "s/^/|-- /"
+        echo
+    } >> "$OUTPUT_PATH"
+}
+
+process_files() {
+    log "INFO" "Processing files..."
+    while IFS= read -r FILE; do
+        if [[ ! -f $FILE || "$FILE" == "$OUTPUT_PATH" ]]; then
+            log "WARN" "File '$FILE' not found or it's the output file. Skipping."
+            continue
+        fi
+        REL_PATH=${FILE#$DIR/}
+        echo "=== $REL_PATH ===" >> "$OUTPUT_PATH"
+        EXT=${FILE##*.}
+        {
+            if [ "$REMOVE_COMMENTS" = true ]; then
+                remove_comments "$FILE" "$EXT" | minify_file "$FILE" "$EXT"
+            else
+                minify_file "$FILE" "$EXT"
+            fi
+            echo
+        } >> "$OUTPUT_PATH" || {
+            log "ERROR" "Error processing file '$FILE'."
+            continue
+        }
+    done < <(eval "$FIND_CMD")
+}
+
+convert_output_format() {
+    case $OUTPUT_FORMAT in
+        json)
+            log "INFO" "Converting output to JSON format..."
+            txt_to_json "$OUTPUT_PATH" "${OUTPUT_PATH%.*}.json"
+            OUTPUT_PATH="${OUTPUT_PATH%.*}.json"
             ;;
-        -o|--output)
-            OUTPUT="$2"
-            shift 2
-            ;;
-        -g|--group)
-            GROUP="$2"
-            shift 2
-            ;;
-        -e|--exclude)
-            IFS=',' read -r -a EXCLUDES <<< "$2"
-            shift 2
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        --)
-            shift
-            break
+        xml)
+            log "INFO" "Converting output to XML format..."
+            txt_to_xml "$OUTPUT_PATH" "${OUTPUT_PATH%.*}.xml"
+            OUTPUT_PATH="${OUTPUT_PATH%.*}.xml"
             ;;
         *)
-            usage
-            exit 1
             ;;
     esac
-done
+}
 
-# Validate directory
-if [[ -z "$DIR" ]]; then
-    echo "Error: Directory is required."
-    usage
-    exit 1
-fi
+main() {
+    parse_args "$@"
+    log "INFO" "Starting aipack in directory '$DIR'..."
+    load_extensions
+    build_find_cmd
 
-if [[ ! -d "$DIR" ]]; then
-    echo "Error: Directory '$DIR' does not exist."
-    exit 1
-fi
+    : > "$OUTPUT_PATH"  # Clear the output file before writing
+    output_structure
+    process_files
 
-# Load preset extensions
-PRESET_FILE="$SCRIPT_DIR/../presets/${GROUP}.json"
-if [[ ! -f "$PRESET_FILE" ]]; then
-    echo "Error: Preset group '$GROUP' not found."
-    exit 1
-fi
+    if [ "$GENERATE_SUMMARY" = true ]; then
+        generate_summary "$DIR/summary.txt" "$DIR"
+        log "INFO" "Summary generated at $DIR/summary.txt"
+    fi
 
-# Extract extensions from JSON
-EXTENSIONS=$(jq -r '.extensions | join(",")' "$PRESET_FILE")
-IFS=',' read -r -a EXT_ARRAY <<< "$EXTENSIONS"
+    convert_output_format
 
-# Remove excluded extensions
-for EX in "${EXCLUDES[@]}"; do
-    EXT_ARRAY=("${EXT_ARRAY[@]/$EX}")
-done
+    if [ "$COMPRESS_OUTPUT" = true ]; then
+        compress_output "$OUTPUT_PATH"
+        log "INFO" "Compressed version saved to ${OUTPUT_PATH}.gz"
+    fi
 
-# Construct find conditions
-FIND_CONDITIONS=()
-for EXT in "${EXT_ARRAY[@]}"; do
-    FIND_CONDITIONS+=( -iname "*.$EXT" -o )
-done
-unset 'FIND_CONDITIONS[${#FIND_CONDITIONS[@]}-1]'
+    log "INFO" "Packaged code saved to $OUTPUT_PATH"
+}
 
-# Set output path
-OUTPUT_PATH="$DIR/$OUTPUT"
-rm -f "$OUTPUT_PATH"
-
-# Process files
-find "$DIR" -type f \( "${FIND_CONDITIONS[@]}" \) | while read -r FILE; do
-    echo "Processing $FILE"
-    echo "===== $FILE =====" >> "$OUTPUT_PATH"
-    EXT="${FILE##*.}"
-    case "$EXT" in
-        css|js)
-            minify "$FILE" "$EXT" >> "$OUTPUT_PATH"
-            ;;
-        html|php)
-            minify "$FILE" "$EXT" >> "$OUTPUT_PATH"
-            ;;
-        sql)
-            minify "$FILE" "$EXT" >> "$OUTPUT_PATH"
-            ;;
-        *)
-            cat "$FILE" >> "$OUTPUT_PATH"
-            ;;
-    esac
-    echo -e "\n" >> "$OUTPUT_PATH"
-done
-
-echo "Packaged code has been saved to $OUTPUT_PATH"
+main "$@"
