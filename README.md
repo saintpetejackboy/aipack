@@ -1,4 +1,5 @@
 # aipack
+![AIPACK Cat Mascot](img/cat-mascot.webp)
 
 **Current Version: 1.1.4**
 
