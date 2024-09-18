@@ -1,60 +1,100 @@
 #!/usr/bin/env bats
 
-# Load common helper functions, if necessary
-load ../lib/utils.sh
-
-# Test 1: Check if aipack shows the correct usage information
-@test "aipack displays usage information" {
-  run ../bin/aipack -h
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Usage: aipack"* ]]
+setup() {
+    load 'test_helper/bats-support/load'
+    load 'test_helper/bats-assert/load'
+    
+    # Create a temporary directory for testing
+    TEST_DIR="$(mktemp -d)"
+    
+    # Copy the aipack script to the test directory
+    cp ../bin/aipack "$TEST_DIR/"
+    
+    # Make the script executable
+    chmod +x "$TEST_DIR/aipack"
+    
+    # Change to the test directory
+    cd "$TEST_DIR"
 }
 
-# Test 2: Check if aipack outputs the correct version
-@test "aipack displays version" {
-  run ../bin/aipack -v
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Version 1.1.4"* ]]
+teardown() {
+    # Remove the temporary directory
+    rm -rf "$TEST_DIR"
 }
 
-# Test 3: Check if aipack can package a directory
-@test "aipack packages directory correctly" {
-  # Create a temporary directory to test
-  mkdir tmp_dir
-  touch tmp_dir/testfile.txt
-  run ../bin/aipack -d tmp_dir -o output.txt
-  [ "$status" -eq 0 ]
-  [ -f tmp_dir/output.txt ]
-  grep "testfile.txt" tmp_dir/output.txt
-  rm -rf tmp_dir
+@test "aipack runs without errors" {
+    run "$TEST_DIR/aipack"
+    assert_success
+    assert_output --partial "Starting aipack"
 }
 
-# Test 4: Check if aipack handles invalid directories
-@test "aipack fails on invalid directory" {
-  run ../bin/aipack -d invalid_dir
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"ERROR: Directory 'invalid_dir' not found."* ]]
+@test "aipack creates output file" {
+    run "$TEST_DIR/aipack"
+    assert [ -f "packaged_output.txt" ]
 }
 
-# Test 5: Check if aipack excludes files with specific extensions
-@test "aipack excludes files based on extension" {
-  mkdir tmp_dir
-  touch tmp_dir/file1.js tmp_dir/file2.py
-  run ../bin/aipack -d tmp_dir -o output.txt -e js
-  [ "$status" -eq 0 ]
-  ! grep "file1.js" tmp_dir/output.txt
-  grep "file2.py" tmp_dir/output.txt
-  rm -rf tmp_dir
+@test "aipack respects custom output file name" {
+    run "$TEST_DIR/aipack" -o "custom_output.txt"
+    assert [ -f "custom_output.txt" ]
 }
 
-# Test 6: Check if aipack compresses output
-@test "aipack compresses output correctly" {
-  mkdir tmp_dir
-  touch tmp_dir/testfile.txt
-  run ../bin/aipack -d tmp_dir -o output.txt -c
-  [ "$status" -eq 0 ]
-  [ -f tmp_dir/output.txt.gz ]
-  rm -rf tmp_dir
+@test "aipack includes specified file extensions" {
+    echo "print('Hello')" > test.py
+    echo "console.log('Hello')" > test.js
+    run "$TEST_DIR/aipack" -e py -e js
+    assert_output --partial "=== test.py ==="
+    assert_output --partial "=== test.js ==="
 }
 
-# Add more tests as needed
+@test "aipack excludes specified patterns" {
+    echo "test content" > include.txt
+    echo "test content" > exclude.txt
+    run "$TEST_DIR/aipack" -x "exclude*"
+    refute_output --partial "=== exclude.txt ==="
+    assert_output --partial "=== include.txt ==="
+}
+
+@test "aipack removes comments when specified" {
+    echo "# This is a comment" > test.py
+    echo "print('Hello')" >> test.py
+    run "$TEST_DIR/aipack" -r
+    refute_output --partial "# This is a comment"
+    assert_output --partial "print('Hello')"
+}
+
+@test "aipack includes hidden files when specified" {
+    echo "hidden content" > .hidden_file
+    run "$TEST_DIR/aipack" -H
+    assert_output --partial "=== .hidden_file ==="
+}
+
+@test "aipack handles different log levels" {
+    run "$TEST_DIR/aipack" -v DEBUG
+    assert_output --partial "[DEBUG]"
+}
+
+@test "aipack generates project structure with directories and files" {
+    mkdir -p dir1/subdir
+    touch dir1/file1.txt
+    touch dir1/subdir/file2.txt
+    run "$TEST_DIR/aipack"
+    assert_output --partial "=== Project Structure ==="
+    assert_output --partial "|-dir1"
+    assert_output --partial "  |-subdir"
+    assert_output --partial "  |-file1.txt"
+    assert_output --partial "    |-file2.txt"
+}
+
+@test "aipack handles files without extensions" {
+    echo "no extension" > file_without_extension
+    run "$TEST_DIR/aipack"
+    assert_output --partial "=== file_without_extension ==="
+}
+
+@test "aipack respects include patterns" {
+    echo "include me" > include_this.txt
+    echo "don't include me" > exclude_this.txt
+    run "$TEST_DIR/aipack" -i "*include*"
+    assert_output --partial "=== include_this.txt ==="
+    refute_output --partial "=== exclude_this.txt ==="
+}

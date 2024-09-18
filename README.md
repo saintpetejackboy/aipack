@@ -1,9 +1,9 @@
 # aipack
 ![AIPACK Cat Mascot](img/cat-mascot.webp)
 
-**Current Version: 1.1.4**
+**Current Version: 1.4.0**
 
-`aipack` is a customizable script packaging tool that bundles various files within a directory into a single, minified output file. It supports file type filtering, preset extension groups, exclusion options, flexible output configurations, and even compression and summary generation, making it ideal for optimizing code for AI processing or sharing across environments.
+`aipack` is a versatile script packaging tool designed to bundle various files within a directory into a single, organized output file. It's perfect for optimizing code for AI processing, sharing across different environments, or creating compact project snapshots.
 
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 
@@ -13,6 +13,7 @@
 - [Installation](#installation)
 - [Usage](#usage)
 - [Examples](#examples)
+- [Testing](#testing)
 - [Compatibility](#compatibility)
 - [Upgrading aipack](#upgrading-aipack)
 - [Reducing Token Count for AI Processing](#reducing-token-count-for-ai-processing)
@@ -22,58 +23,41 @@
 
 ## Features
 
-- **Customizable File Types**: Dynamically define file types to include or exclude during packaging.
-- **Preset Extension Groups**: Use predefined groups such as `default`, `web`, `python`, and more.
-- **Selective Include/Exclude Options**: Add or remove specific extensions during packaging.
-- **Minified Output**: Automatically compress and minify code for efficient use and easy pasting into AI tools.
-- **Flexible Output**: Specify a custom output file name or use the default (`packaged_output.txt`).
-- **Directory Structure Output**: Outputs a summary of the project structure along with file contents.
-- **Comment Removal**: Experimental feature to remove comments from code, further reducing file size.
-- **Output Compression**: Automatically compresses the output file using gzip.
-- **Project Summary**: Generates a summary file with project statistics.
-- **Multiple Output Formats**: Choose between `txt` (default), `json`, or `xml` formats for the packaged output.
-- **Default Behavior**: Running `aipack` without any arguments packages the current directory using default settings.
+- **Customizable File Types**: Dynamically define file types to include or exclude.
+- **Selective Include/Exclude Options**: Add or remove specific files or patterns.
+- **Include Hidden Files**: Optionally include hidden system files and directories.
+- **Include Files Without Extensions**: Capture all relevant files, regardless of extension.
+- **Comment Removal**: Experimental feature to remove comments from code files.
+- **Flexible Output**: Specify a custom output file name or use the default.
+- **Directory Structure Output**: Includes a summary of the project structure.
+- **Logging Levels**: Adjust the verbosity of the script's output.
 
 ## Installation
 
 ### Prerequisites
 
-- **Ubuntu or other Unix-like System**
-- **Git**: Version control system
-- **jq**: JSON parsing utility
-- **tree**: Directory listing program
-- **gzip**: Compression utility
+- Unix-like system (Ubuntu, Debian, Fedora, macOS, etc.)
+- Git
+- Bash
 
-To install the required dependencies:
+### Steps
 
-```bash
-sudo apt-get update
-sudo apt-get install git jq tree gzip
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/saintpetejackboy/aipack.git
+   cd aipack
+   ```
 
-### Clone the Repository
+2. Make the script executable:
+   ```bash
+   chmod +x bin/aipack
+   ```
 
-```bash
-git clone https://github.com/saintpetejackboy/aipack.git
-cd aipack
-```
-
-### Make the Script Executable
-
-```bash
-chmod +x bin/aipack
-```
-
-### Add `aipack` to Your PATH
-
-Add the `bin` directory to your system's PATH to easily run `aipack` from any location:
-
-```bash
-echo 'export PATH="$PATH:/path/to/aipack/bin"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-*Replace `/path/to/aipack/bin` with the actual path where `aipack` is located.*
+3. Add to your PATH:
+   ```bash
+   echo 'export PATH="$PATH:/path/to/aipack/bin"' >> ~/.bashrc
+   source ~/.bashrc
+   ```
 
 ## Usage
 
@@ -83,99 +67,66 @@ aipack [options]
 
 ### Options
 
-- `-d DIR`       Directory to package (default: current directory)
-- `-o FILE`      Output file (default: `packaged_output.txt`)
-- `-g GROUP`     Preset group (default: `default`)
-- `-e EXTS`      Exclude extensions (comma-separated)
-- `-r`           Remove comments (experimental)
-- `-c`           Compress output using gzip (optional)
-- `-s`           Generate project summary (optional)
-- `-i PATTERN`   Include files matching pattern
-- `-x PATTERN`   Exclude files matching pattern
-- `-f FORMAT`    Output format: `txt` (default), `json`, `xml`
-- `-v LEVEL`     Log level: `DEBUG`, `INFO`, `WARN`, `ERROR` (default: `INFO`)
-- `-l`           Include LICENSE file in output
-- `-m`           Include README.md file in output
-- `-h`           Display help message
+- `-d <dir>`: Directory to package (default: current directory)
+- `-o <output>`: Output file name (default: `packaged_output.txt`)
+- `-e <ext>`: File extension to include (can be used multiple times)
+- `-r`: Remove comments from code files
+- `-i <pattern>`: Include files matching pattern (can be used multiple times)
+- `-x <pattern>`: Exclude files matching pattern (can be used multiple times)
+- `-v <level>`: Log level (DEBUG, INFO, WARN, ERROR)
+- `-H`: Include hidden files and directories
+- `-h`: Show help message
 
 ## Examples
 
-### Package Current Directory with Default Settings
-
+### Basic Usage
 ```bash
 aipack
 ```
 
-This will package the current directory using all default settings and create `packaged_output.txt`.
-
-### Package Specific Directory with Default Settings
-
+### Custom Directory and Output
 ```bash
-aipack -d /path/to/project
+aipack -d /path/to/project -o project_bundle.txt
 ```
 
-This will package the specified directory using default settings.
-
-### Package with Web Preset and Custom Output Name
-
+### Include Specific Extensions
 ```bash
-aipack -d /path/to/project -g web -o web_bundle.txt
+aipack -e py -e js -e html
 ```
 
-This uses the `web` preset and outputs to `web_bundle.txt`.
-
-### Exclude Specific Extensions and Remove Comments
-
+### Exclude Patterns and Remove Comments
 ```bash
-aipack -d /path/to/project -e js,css -r
+aipack -x "*.test.js" -x "vendor/*" -r
 ```
 
-This excludes `js` and `css` files and removes comments from the packaged code.
-
-### Package and Compress Output
-
+### Include Hidden Files
 ```bash
-aipack -c
+aipack -H
 ```
 
-This will package the current directory and compress the output using gzip.
+## Testing
 
-### Package and Generate Summary
+We use [Bats](https://github.com/bats-core/bats-core) for testing. To run the tests:
 
-```bash
-aipack -s
-```
+1. Install Bats:
+   ```bash
+   git clone https://github.com/bats-core/bats-core.git
+   cd bats-core
+   ./install.sh /usr/local
+   ```
 
-This will generate a project summary alongside the packaged output.
-
-### Include and Exclude Files Using Patterns
-
-```bash
-aipack -i "*.test.js" -x "*.spec.js"
-```
-
-This includes files matching `*.test.js` and excludes files matching `*.spec.js`.
-
-### Change Output Format to JSON
-
-```bash
-aipack -f json
-```
-
-This will output the packaged code in JSON format.
+2. Run the tests:
+   ```bash
+   bats tests/aipack_tests.bats
+   ```
 
 ## Compatibility
 
-`aipack` is compatible with Unix-like systems, including:
-
-- Ubuntu
-- Debian
-- Fedora
-- macOS (with minor adjustments)
+`aipack` is compatible with Unix-like systems, including Ubuntu, Debian, Fedora, and macOS (with minor adjustments).
 
 ## Upgrading `aipack`
 
-To upgrade to the latest version of `aipack`:
+To upgrade to the latest version:
 
 1. Navigate to the `aipack` directory:
    ```bash
@@ -197,25 +148,26 @@ To upgrade to the latest version of `aipack`:
    source ~/.bashrc
    ```
 
-5. Verify the installation:
-   ```bash
-   aipack -h
-   ```
-
 ## Reducing Token Count for AI Processing
 
-`aipack` employs several strategies to optimize output for AI processing:
+`aipack` optimizes output for AI processing by:
 
-- Comment minimization
-- Whitespace optimization
-- Code simplification
-- Optional comment removal
+- Removing comments (optional)
+- Selectively including files
+- Optimizing whitespace
+- Providing flexible output configuration
 
-These techniques ensure that the output is concise and optimized for input into AI systems with token limits.
+These techniques ensure that the output is concise and optimized for AI systems with token limits.
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/YourFeature`)
+3. Commit your changes (`git commit -m 'Add some feature'`)
+4. Push to the branch (`git push origin feature/YourFeature`)
+5. Open a Pull Request
 
 ## License
 
@@ -223,13 +175,8 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Versioning
 
-`aipack` follows [Semantic Versioning](https://semver.org/). The version number is in the format MAJOR.MINOR.PATCH.
-
-- MAJOR version increments indicate incompatible API changes,
-- MINOR version increments indicate added functionality in a backwards-compatible manner, and
-- PATCH version increments indicate backwards-compatible bug fixes.
+`aipack` follows [Semantic Versioning](https://semver.org/). The version number format is MAJOR.MINOR.PATCH.
 
 ---
 
 For the latest updates and more information, visit the [aipack GitHub repository](https://github.com/saintpetejackboy/aipack).
-```
